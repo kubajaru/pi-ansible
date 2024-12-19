@@ -1,0 +1,72 @@
+---
+- hosts: all
+  tasks:
+    - name: Create user for cloudflared
+      ansible.builtin.user:
+        name: cloudflared
+        shell: /usr/sbin/nologin
+        state: present
+        system: true
+        create_home: false
+      become: yes
+
+    - name: Download cloudflared
+      ansible.builtin.get_url:
+        url:  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64
+        dest: /usr/local/bin/cloudflared
+        mode: a+x
+        owner: cloudflared
+      become: yes
+
+    - name: Create config file for cloudflared
+      ansible.builtin.file:
+        path: /etc/default/cloudflared
+        state: touch
+        owner: cloudflared
+      become: yes
+
+    - name: Provide config to config file for cloudflared
+      shell: |
+        echo '# Commandline args for cloudflared, using Cloudflare DNS
+        CLOUDFLARED_OPTS=--port 5053 --upstream https://cloudflare-dns.com/dns-query
+        ' >> /etc/default/cloudflared 
+      become: yes
+
+    - name: Create config file for cloudflared service
+      ansible.builtin.file:
+        path: /etc/systemd/system/cloudflared.service
+        state: touch
+      become: yes
+
+    - name: Provide config to config file for cloudflared service
+      shell: |
+        echo '[Unit]
+        Description=cloudflared DNS over HTTPS proxy
+        After=syslog.target network-online.target
+        
+        [Service]
+        Type=simple
+        User=cloudflared
+        EnvironmentFile=/etc/default/cloudflared
+        ExecStart=/usr/local/bin/cloudflared proxy-dns $CLOUDFLARED_OPTS
+        Restart=on-failure
+        RestartSec=10
+        KillMode=process
+        
+        [Install]
+        WantedBy=multi-user.target
+        ' >> /etc/systemd/system/cloudflared.service
+      become: yes
+
+    - name: Make sure a cloudflared service is running
+      ansible.builtin.systemd:
+        state: started
+        name: cloudflared
+        enabled: true
+        masked: no
+
+    - name: Make sure a cloudflared service is enabled
+      ansible.builtin.systemd:
+        name: cloudflared
+        enabled: true
+        masked: no
